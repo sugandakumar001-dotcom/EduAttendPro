@@ -1,10 +1,14 @@
 import os
-from datetime import date, datetime
-from flask import Flask, render_template, redirect, url_for, request, flash, session
+from datetime import date, datetime, timedelta
+import secrets
+import io
+import base64
+import qrcode
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from flask import Flask, render_template, redirect, url_for, request, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-from notifications import notify_student
 from notifications import notify_student
 
 load_dotenv()
@@ -14,6 +18,38 @@ db_url = os.getenv("DATABASE_URL", "sqlite:///eduattend.db")
 app.config["SQLALCHEMY_DATABASE_URI"] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
+def generate_qr_code(data):
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4
+    )
+
+    qr.add_data(data)
+    qr.make(fit=True)
+
+    image = qr.make_image(
+        fill_color="black",
+        back_color="white"
+    )
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+
+    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    return f"data:image/png;base64,{encoded}"
+
+
+def qr_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"])
+def generate_student_qr_token(student_id):
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="student-id-qr"
+    )
+    return serializer.dumps({"student_id": student_id})
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -46,6 +82,24 @@ class Attendance(db.Model):
     attendance_date = db.Column(db.Date, default=date.today)
     status = db.Column(db.String(20), nullable=False)
     periods = db.Column(db.Integer, default=1)
+class QRSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+
+    token = db.Column(db.String(100), unique=True, nullable=False)
+
+    subject = db.Column(db.String(120), nullable=False)
+
+    created_by = db.Column(
+        db.Integer,
+        db.ForeignKey("user.id"),
+        nullable=False
+    )
+
+    expires_at = db.Column(db.DateTime, nullable=False)
+
+    active = db.Column(db.Boolean, default=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class LeaveRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -96,6 +150,41 @@ class NotificationLog(db.Model):
 def current_user():
     uid = session.get("user_id")
     return db.session.get(User, uid) if uid else None
+@app.route("/admin/create-faculty", methods=["POST"])
+def create_faculty():
+    user = current_user()
+
+    if not user or user.role != "admin":
+        flash("Admin access required.", "error")
+        return redirect(url_for("login"))
+
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    phone = request.form.get("phone", "").strip()
+    password = request.form.get("password", "")
+
+    if not name or not email or not password:
+        flash("Please fill all required fields.", "error")
+        return redirect(url_for("admin_assignments"))
+
+    if User.query.filter_by(email=email).first():
+        flash("This email already exists.", "error")
+        return redirect(url_for("admin_assignments"))
+
+    faculty = User(
+        name=name,
+        email=email,
+        phone=phone,
+        role="faculty"
+    )
+
+    faculty.set_password(password)
+
+    db.session.add(faculty)
+    db.session.commit()
+
+    flash("Faculty account created successfully.", "success")
+    return redirect(url_for("admin_assignments"))
 
 @app.context_processor
 def inject_user(): return {"current_user": current_user()}
@@ -104,16 +193,36 @@ def inject_user(): return {"current_user": current_user()}
 def index():
     return redirect(url_for("dashboard") if current_user() else url_for("login"))
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        user = User.query.filter_by(email=request.form["email"].strip().lower()).first()
-        if user and user.check_password(request.form["password"]):
-            session["user_id"] = user.id
-            return redirect(url_for("dashboard"))
-        flash("Invalid email or password.", "error")
-    return render_template("login.html")
+        email = request.form["email"].strip().lower()
+        password = request.form["password"]
 
+        user = User.query.filter_by(email=email).first()
+
+        if user and user.check_password(password):
+            session["user_id"] = user.id
+
+            if user.role == "admin":
+                return redirect(url_for("admin_assignments"))
+
+            elif user.role == "faculty":
+                return redirect(url_for("faculty_dashboard"))
+
+            elif user.role == "advisor":
+                return redirect(url_for("advisor_dashboard"))
+
+            elif user.role == "hod":
+                return redirect(url_for("hod_dashboard"))
+
+            else:
+                return redirect(url_for("dashboard"))
+
+        flash("Invalid email or password.", "error")
+
+    return render_template("login.html")
 @app.route("/logout")
 def logout():
     session.clear()
@@ -563,7 +672,222 @@ def init_db():
         db.session.add(admin)
         db.session.commit()
 print("Database initialized. Demo: student@example.com / Student@123")
+@app.route("/student/my-qr")
+def student_my_qr():
+    user = current_user()
+
+    if not user:
+        return redirect(url_for("login"))
+
+    if user.role != "student":
+        flash("Only students can access their personal QR code.", "error")
+        return redirect(url_for("dashboard"))
+
+    token = generate_student_qr_token(user.id)
+    qr_image = generate_qr_code(token)
+
+    return render_template(
+        "student_qr.html",
+        user=user,
+        qr_image=qr_image
+    )
+@app.route("/faculty/dashboard")
+def faculty_dashboard():
+    user = current_user()
+
+    if not user:
+        return redirect(url_for("login"))
+
+    if user.role != "faculty":
+        flash("Faculty access required.", "error")
+        return redirect(url_for("dashboard"))
+
+    return render_template("faculty_dashboard.html", user=user)
+
+@app.route("/faculty/generate-qr", methods=["POST"])
+def faculty_generate_qr():
+    user = current_user()
+
+    if not user:
+        return redirect(url_for("login"))
+
+    if user.role != "faculty":
+        flash("Faculty access required.", "error")
+        return redirect(url_for("dashboard"))
+
+    subject = request.form.get("subject", "").strip()
+
+    if not subject:
+        flash("Please enter a subject.", "error")
+        return redirect(url_for("faculty_dashboard"))
+
+    # Create a unique QR attendance session
+    token = secrets.token_urlsafe(32)
+
+    qr_session = QRSession(
+        token=token,
+        subject=subject,
+        created_by=user.id,
+        expires_at=datetime.utcnow() + timedelta(minutes=10),
+        active=True
+    )
+
+    db.session.add(qr_session)
+    db.session.commit()
+
+    # Generate the student attendance URL
+    attendance_url = url_for(
+        "student_scan_attendance",
+        token=token,
+        _external=True
+    )
+
+    qr_image = generate_qr_code(attendance_url)
+
+    return render_template(
+        "faculty_qr.html",
+        qr_image=qr_image,
+        subject=subject,
+        expires_at=qr_session.expires_at
+    )
+
+@app.route("/student/scan-attendance/<token>")
+def student_scan_attendance(token):
+    user = current_user()
+
+    if not user:
+        flash("Please log in before scanning attendance QR.", "error")
+        return redirect(url_for("login"))
+
+    if user.role != "student":
+        flash("Only students can mark attendance.", "error")
+        return redirect(url_for("dashboard"))
+
+    qr_session = QRSession.query.filter_by(
+        token=token,
+        active=True
+    ).first()
+
+    if not qr_session:
+        flash("Invalid or inactive QR code.", "error")
+        return redirect(url_for("dashboard"))
+
+    if datetime.utcnow() > qr_session.expires_at:
+        qr_session.active = False
+        db.session.commit()
+        flash("This attendance QR code has expired.", "error")
+        return redirect(url_for("dashboard"))
+
+    # Prevent duplicate attendance
+    existing = Attendance.query.filter_by(
+        student_id=user.id,
+        subject=qr_session.subject,
+        attendance_date=date.today()
+    ).first()
+
+    if existing:
+        flash("Attendance already recorded for this subject today.", "error")
+        return redirect(url_for("attendance"))
+
+    record = Attendance(
+        student_id=user.id,
+        subject=qr_session.subject,
+        attendance_date=date.today(),
+        status="Present",
+        periods=1
+    )
+
+    db.session.add(record)
+    db.session.commit()
+
+    flash(
+        f"Attendance marked successfully for {qr_session.subject}!",
+        "success"
+    )
+
+    return redirect(url_for("attendance"))
+@app.route("/faculty/qr-scanner")
+def faculty_qr_scanner():
+    user = current_user()
+
+    if not user:
+        return redirect(url_for("login"))
+
+    if user.role != "faculty":
+        flash("Faculty access required.", "error")
+        return redirect(url_for("dashboard"))
+
+    return render_template("faculty_qr_scanner.html")
+
+@app.route("/faculty/scan-student-qr", methods=["POST"])
+def faculty_scan_student_qr():
+    faculty = current_user()
+
+    if not faculty:
+        return jsonify({"success": False, "message": "Please log in."}), 401
+
+    if faculty.role != "faculty":
+        return jsonify({"success": False, "message": "Faculty access required."}), 403
+
+    data = request.get_json(silent=True) or {}
+    token = data.get("token", "")
+    subject = data.get("subject", "").strip()
+
+    if not token or not subject:
+        return jsonify({
+            "success": False,
+            "message": "Student QR and subject are required."
+        }), 400
+
+    try:
+        serializer = URLSafeTimedSerializer(
+            app.config["SECRET_KEY"],
+            salt="student-id-qr"
+        )
+        payload = serializer.loads(token)
+        student_id = payload.get("student_id")
+    except (BadSignature, SignatureExpired):
+        return jsonify({
+            "success": False,
+            "message": "Invalid student QR code."
+        }), 400
+
+    student = db.session.get(User, student_id)
+
+    if not student or student.role != "student":
+        return jsonify({
+            "success": False,
+            "message": "Student account not found."
+        }), 404
+
+    existing = Attendance.query.filter_by(
+        student_id=student.id,
+        subject=subject,
+        attendance_date=date.today()
+    ).first()
+
+    if existing:
+        return jsonify({
+            "success": False,
+            "message": f"Attendance already recorded for {student.name}."
+        }), 409
+
+    record = Attendance(
+        student_id=student.id,
+        subject=subject,
+        attendance_date=date.today(),
+        status="Present",
+        periods=1
+    )
+
+    db.session.add(record)
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "message": f"Attendance marked for {student.name} – {subject}."
+    }), 200
 
 if __name__ == "__main__":
     with app.app_context(): db.create_all()
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)

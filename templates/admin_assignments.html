@@ -59,4 +59,47 @@
     </form>
 </div>
 
+<div class="panel">
+    <h3>Create Faculty Account</h3>
+
+    <form method="POST" action="/admin/create-faculty">
+
+        <label>Faculty Name</label>
+        <input
+            type="text"
+            name="name"
+            placeholder="Enter faculty name"
+            required
+        >
+
+        <label>Faculty Email</label>
+        <input
+            type="email"
+            name="email"
+            placeholder="Enter faculty email"
+            required
+        >
+
+        <label>Phone Number</label>
+        <input
+            type="text"
+            name="phone"
+            placeholder="+91XXXXXXXXXX"
+        >
+
+        <label>Password</label>
+        <input
+            type="password"
+            name="password"
+            placeholder="Create faculty password"
+            required
+        >
+
+        <button type="submit" class="btn green">
+            Create Faculty Account
+        </button>
+
+    </form>
+</div>
+
 {% endblock %}

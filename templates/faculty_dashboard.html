@@ -1,0 +1,39 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container" style="max-width:900px; margin:30px auto;">
+
+    <h2>Faculty Dashboard</h2>
+    <p>Welcome, <strong>{{ user.name }}</strong>!</p>
+
+    <div class="panel" style="padding:20px; margin-top:20px;">
+        <h3>1. Generate Dynamic Attendance QR</h3>
+        <p>Generate a temporary QR code for students to scan.</p>
+
+        <form method="POST" action="/faculty/generate-qr">
+            <label>Subject Name</label>
+            <input
+                type="text"
+                name="subject"
+                placeholder="Enter subject name"
+                required
+            >
+
+            <button type="submit" class="btn green">
+                Generate Attendance QR
+            </button>
+        </form>
+    </div>
+
+    <div class="panel" style="padding:20px; margin-top:20px;">
+        <h3>2. Scan Student ID QR</h3>
+        <p>Scan a student's personal QR code to mark attendance.</p>
+
+        <a href="/faculty/qr-scanner" class="btn green">
+            Open Student QR Scanner
+        </a>
+    </div>
+
+</div>
+{% endblock %}

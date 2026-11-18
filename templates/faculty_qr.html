@@ -1,0 +1,102 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container" style="max-width:700px; margin:40px auto; text-align:center;">
+
+    <h2>Faculty – Student QR Scanner</h2>
+
+    <label>Subject Name</label>
+    <input
+        type="text"
+        id="subject"
+        placeholder="Enter subject name"
+        required
+    >
+
+    <div id="reader" style="width:100%; max-width:500px; margin:25px auto;"></div>
+
+    <p id="scan-result">Enter subject and start scanner.</p>
+
+    <button type="button" onclick="startScanner()">Start Scanner</button>
+    <button type="button" onclick="stopScanner()">Stop Scanner</button>
+
+</div>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<script>
+let scanner = null;
+let processing = false;
+
+async function startScanner() {
+    const subject = document.getElementById("subject").value.trim();
+
+    if (!subject) {
+        alert("Please enter the subject name.");
+        return;
+    }
+
+    try {
+        if (!scanner) {
+            scanner = new Html5Qrcode("reader");
+        }
+
+        await scanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+
+            async (decodedText) => {
+                if (processing) return;
+                processing = true;
+
+                document.getElementById("scan-result").textContent =
+                    "Verifying student...";
+
+                try {
+                    await scanner.stop();
+
+                    const response = await fetch("/faculty/scan-student-qr", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            token: decodedText,
+                            subject: subject
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    document.getElementById("scan-result").textContent =
+                        result.message;
+
+                } catch (error) {
+                    document.getElementById("scan-result").textContent =
+                        "Scanning failed: " + error;
+                }
+
+                processing = false;
+            }
+        );
+
+        document.getElementById("scan-result").textContent =
+            "Camera started. Scan a student QR code.";
+
+    } catch (error) {
+        document.getElementById("scan-result").textContent =
+            "Camera error: " + error;
+    }
+}
+
+async function stopScanner() {
+    if (scanner && scanner.isScanning) {
+        await scanner.stop();
+        document.getElementById("scan-result").textContent =
+            "Scanner stopped.";
+    }
+}
+</script>
+
+{% endblock %}

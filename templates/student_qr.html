@@ -1,0 +1,29 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container" style="max-width:600px; margin:40px auto; text-align:center; padding:25px;">
+    <h2>My Student QR Code</h2>
+
+    <p>Student: <strong>{{ user.name }}</strong></p>
+    <p>Email: {{ user.email }}</p>
+
+    <div style="margin:25px auto;">
+        <img
+            src="{{ qr_image }}"
+            alt="Student QR Code"
+            style="width:260px; max-width:100%; border:1px solid #ddd; padding:12px; border-radius:12px;"
+        >
+    </div>
+
+    <p>Show this QR code to your faculty for attendance verification.</p>
+
+    <button onclick="window.print()" class="btn btn-primary">
+        Print QR Code
+    </button>
+
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">
+        Back to Dashboard
+    </a>
+</div>
+{% endblock %}
