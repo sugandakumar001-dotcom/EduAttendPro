@@ -1,0 +1,78 @@
+
+{% extends "base.html" %}
+
+{% block content %}
+
+<h1>HOD Dashboard</h1>
+<p>Review and manage Advisor-approved leave applications.</p>
+
+<div class="panel">
+    <h3>Pending Final Approvals</h3>
+
+    {% for leave in pending %}
+
+    <div class="activity">
+        <div class="grow">
+            <b>{{ User.query.get(leave.student_id).name if false else "Student ID: " ~ leave.student_id }}</b>
+
+            <small>Subject: {{ leave.subject }}</small>
+            <small>From: {{ leave.start_date }} To: {{ leave.end_date }}</small>
+            <small>Reason: {{ leave.reason }}</small>
+            <small>Advisor Remarks: {{ leave.advisor_remarks or "None" }}</small>
+        </div>
+
+        <span class="pill">Pending HOD</span>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('hod_review', leave_id=leave.id) }}"
+          class="review-form">
+
+        <input type="text"
+               name="remarks"
+               placeholder="Enter HOD remarks">
+
+        <button class="btn green"
+                name="action"
+                value="approve">
+            Final Approve
+        </button>
+
+        <button class="btn"
+                name="action"
+                value="reject">
+            Reject
+        </button>
+
+    </form>
+
+    {% else %}
+
+    <p>No pending approvals.</p>
+
+    {% endfor %}
+</div>
+
+<div class="panel">
+    <h3>Reviewed Applications</h3>
+
+    {% for leave in reviewed %}
+
+    <div class="leave-row">
+        <div>
+            <b>Request #{{ leave.id }}</b>
+            <small>{{ leave.subject }}</small>
+            <small>{{ leave.hod_remarks or "No remarks" }}</small>
+        </div>
+
+        <span class="pill">{{ leave.status }}</span>
+    </div>
+
+    {% else %}
+
+    <p>No reviewed applications.</p>
+
+    {% endfor %}
+</div>
+
+{% endblock %}

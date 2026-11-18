@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="heading">
+    <div>
+        <h1>Class Advisor Dashboard</h1>
+        <p>Manage student leave applications</p>
+    </div>
+</div>
+
+<div class="panel">
+    <h3>Pending Leave Requests</h3>
+    <p>Review applications submitted by your assigned students.</p>
+
+    {% for leave in pending %}
+
+    <div class="activity">
+        <div class="grow">
+            <b>Leave Request #{{ leave.id }}</b>
+
+            <small>
+                Subject: {{ leave.subject }}
+            </small>
+
+            <small>
+                {{ leave.start_date }} to {{ leave.end_date }}
+            </small>
+
+            <small>
+                Reason: {{ leave.reason }}
+            </small>
+        </div>
+
+        <span class="pill">Pending Advisor</span>
+    </div>
+
+    <form method="POST"
+          action="{{ url_for('advisor_review', leave_id=leave.id) }}"
+          class="review-form">
+
+        <input
+            type="text"
+            name="remarks"
+            placeholder="Enter remarks"
+        >
+
+        <button
+            type="submit"
+            name="action"
+            value="approve"
+            class="btn green">
+            Approve
+        </button>
+
+        <button
+            type="submit"
+            name="action"
+            value="reject"
+            class="btn">
+            Reject
+        </button>
+
+    </form>
+
+    {% else %}
+
+    <p>No pending leave requests.</p>
+
+    {% endfor %}
+</div>
+
+<div class="panel">
+    <h3>Reviewed Requests</h3>
+
+    {% for leave in reviewed %}
+
+    <div class="leave-row">
+        <div>
+            <b>Request #{{ leave.id }}</b>
+            <small>{{ leave.subject }}</small>
+        </div>
+
+        <span class="pill">{{ leave.status }}</span>
+    </div>
+
+    {% else %}
+
+    <p>No reviewed requests.</p>
+
+    {% endfor %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>Notification History</h1><div class="panel">{% for n in rows %}<div class="leave-row"><div><b>{{n.channel|upper}} · {{n.status}}</b><small>{{n.created_at}}</small><p>{{n.message}}</p></div></div>{% else %}<p>No notifications yet.</p>{% endfor %}</div>{% endblock %}

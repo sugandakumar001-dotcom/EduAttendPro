@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Admin Assignment Management</h1>
+<p>Assign students to advisors and advisors to HODs.</p>
+
+<div class="panel">
+    <h3>Assign HOD to Advisor</h3>
+
+    <form method="POST" action="/admin/assign-hod">
+        <label>Select Advisor</label>
+        <select name="advisor_id" required>
+            {% for advisor in advisors %}
+            <option value="{{ advisor.id }}">
+                {{ advisor.name }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <label>Select HOD</label>
+        <select name="hod_id" required>
+            {% for hod in hods %}
+            <option value="{{ hod.id }}">
+                {{ hod.name }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <button class="btn green">Assign HOD</button>
+    </form>
+</div>
+
+<div class="panel">
+    <h3>Assign Advisor to Student</h3>
+
+    <form method="POST" action="/admin/assign-advisor">
+        <label>Select Student</label>
+        <select name="student_id" required>
+            {% for student in students %}
+            <option value="{{ student.id }}">
+                {{ student.name }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <label>Class Name</label>
+        <input name="class_name" required placeholder="Example: AI&DS - A">
+
+        <label>Select Advisor</label>
+        <select name="advisor_id" required>
+            {% for advisor in advisors %}
+            <option value="{{ advisor.id }}">
+                {{ advisor.name }}
+            </option>
+            {% endfor %}
+        </select>
+
+        <button class="btn green">Assign Advisor</button>
+    </form>
+</div>
+
+{% endblock %}

@@ -1,0 +1,1 @@
+{% extends "base.html" %}{% block content %}<h1>{{title}}</h1><div class="panel">{% for r in rows %}<div class="leave-row"><b>{{r.subject}}</b><span>{{r.attendance_date}} · {{r.status}} · {{r.periods}} periods</span></div>{% else %}<p>No records found.</p>{% endfor %}</div>{% endblock %}
