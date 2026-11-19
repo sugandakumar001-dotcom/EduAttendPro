@@ -31,3 +31,17 @@
     border: 1px solid #ddd;
     border-radius: 6px;
 }
+
+.logout-btn {
+    background: #dc2626;
+    color: white;
+    text-decoration: none;
+    padding: 9px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+.logout-btn:hover {
+    background: #b91c1c;
+    color: white;
+}
