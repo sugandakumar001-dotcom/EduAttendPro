@@ -9,7 +9,7 @@ from flask import Flask, render_template, redirect, url_for, request, flash, ses
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-from notifications import notify_student
+from notifications import notify_student, send_email
 
 load_dotenv()
 app = Flask(__name__)
@@ -228,24 +228,89 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+
 @app.route("/dashboard")
 def dashboard():
     user = current_user()
-    if not user: return redirect(url_for("login"))
-    records = Attendance.query.filter_by(student_id=user.id).order_by(Attendance.attendance_date.desc()).limit(5).all()
+    if not user:
+        return redirect(url_for("login"))
+
+    records = Attendance.query.filter_by(
+        student_id=user.id
+    ).order_by(Attendance.attendance_date.desc()).limit(5).all()
+
     all_records = Attendance.query.filter_by(student_id=user.id).all()
+
     total = sum(x.periods for x in all_records)
-    present = sum(x.periods for x in all_records if x.status == "Present")
+    present = sum(
+        x.periods for x in all_records if x.status == "Present"
+    )
+
     pct = round(present * 100 / total, 1) if total else 0
-    leaves = LeaveRequest.query.filter_by(student_id=user.id).order_by(LeaveRequest.id.desc()).all()
+
+    leaves = LeaveRequest.query.filter_by(
+        student_id=user.id
+    ).order_by(LeaveRequest.id.desc()).all()
+
     subjects = {}
     for row in all_records:
         item = subjects.setdefault(row.subject, [0, 0])
         item[1] += row.periods
-        if row.status == "Present": item[0] += row.periods
-    subject_stats = [{"name": k, "present": v[0], "total": v[1], "pct": round(v[0]*100/v[1],1) if v[1] else 0} for k,v in subjects.items()]
-    return render_template("dashboard.html", user=user, records=records, pct=pct, present=present,
-                           total=total, leaves=leaves, subject_stats=subject_stats)
+        if row.status == "Present":
+            item[0] += row.periods
+
+    subject_stats = [
+        {
+            "name": k,
+            "present": v[0],
+            "total": v[1],
+            "pct": round(v[0] * 100 / v[1], 1) if v[1] else 0
+        }
+        for k, v in subjects.items()
+    ]
+
+    # Calculate the latest leave attendance impact
+    leave_impact = None
+
+    if user.role == "student" and leaves:
+        latest_leave = leaves[0]
+
+        working_days = sum(
+    1
+    for day in range(
+        (latest_leave.end_date - latest_leave.start_date).days + 1
+    )
+    if date.fromordinal(
+        latest_leave.start_date.toordinal() + day
+    ).weekday() < 5
+)
+
+        missed_periods = working_days
+
+        projected_pct = round(
+            present * 100 / (total + missed_periods), 1
+        ) if total + missed_periods else 0
+
+        leave_impact = {
+            "subject": latest_leave.subject,
+            "current_pct": pct,
+            "projected_pct": projected_pct,
+            "decrease": round(pct - projected_pct, 1),
+            "missed_periods": missed_periods
+        }
+
+    return render_template(
+        "dashboard.html",
+        user=user,
+        records=records,
+        pct=pct,
+        present=present,
+        total=total,
+        leaves=leaves,
+        subject_stats=subject_stats,
+        leave_impact=leave_impact
+    )
+
 
 @app.route("/attendance")
 def attendance():
@@ -253,6 +318,7 @@ def attendance():
     if not user: return redirect(url_for("login"))
     rows=Attendance.query.filter_by(student_id=user.id).order_by(Attendance.attendance_date.desc()).all()
     return render_template("simple.html", title="My Attendance", rows=rows)
+
 
 
 @app.route("/leaves", methods=["GET", "POST"])
@@ -282,6 +348,7 @@ def leaves():
             flash("No HOD assigned to your Class Advisor.", "error")
             return redirect(url_for("leaves"))
 
+        # Create leave request
         item = LeaveRequest(
             student_id=user.id,
             subject=request.form["subject"],
@@ -298,7 +365,164 @@ def leaves():
         db.session.add(item)
         db.session.commit()
 
-        flash("Leave request submitted to your Class Advisor!", "success")
+        # Calculate current attendance
+        all_records = Attendance.query.filter_by(
+            student_id=user.id
+        ).all()
+
+        total = sum(record.periods for record in all_records)
+
+        present = sum(
+            record.periods
+            for record in all_records
+            if record.status == "Present"
+        )
+
+        current_pct = round(
+            present * 100 / total, 1
+        ) if total else 0
+
+        # Calculate working days
+        working_days = sum(
+            1
+            for day in range(
+                (item.end_date - item.start_date).days + 1
+            )
+            if date.fromordinal(
+                item.start_date.toordinal() + day
+            ).weekday() < 5
+        )
+
+        missed_periods = working_days
+
+        # Calculate projected attendance
+        projected_pct = round(
+            present * 100 / (total + missed_periods), 1
+        ) if total + missed_periods else 0
+
+        decrease = round(current_pct - projected_pct, 1)
+
+        # Prepare Gmail message
+        email_body = f"""
+Dear {user.name},
+
+Your leave request has been submitted successfully.
+
+LEAVE DETAILS
+Subject: {item.subject}
+Start Date: {item.start_date}
+End Date: {item.end_date}
+Expected Missed Periods: {missed_periods}
+
+ATTENDANCE IMPACT
+Current Attendance: {current_pct}%
+Projected Attendance: {projected_pct}%
+Expected Attendance Decrease: {decrease}%
+
+This is an estimate based on Monday-Friday working days
+and one period per working day.
+
+Your actual attendance will not change automatically.
+
+Regards,
+EduAttendPro Team
+"""
+
+        
+        # Create designed HTML attendance alert
+        status_message = (
+            "Attendance is still above the 75% requirement."
+            if projected_pct >= 75
+            else "Warning: Your projected attendance is below 75%."
+        )
+
+        status_color = "#087a35" if projected_pct >= 75 else "#dc2626"
+
+        html_body = f"""
+        <!DOCTYPE html>
+        <html>
+        <body style="margin:0;padding:20px;background:#f5f5f5;
+                     font-family:Arial,sans-serif;">
+          <div style="max-width:700px;margin:auto;background:#ffffff;
+                      border:1px solid #dddddd;border-radius:18px;
+                      padding:26px;">
+
+            <div style="display:inline-block;background:#ffe5dc;
+                        color:#9a3e13;padding:9px 15px;
+                        border-radius:25px;">
+              Attendance alert
+            </div>
+
+            <h1 style="font-size:46px;color:#a04416;margin:22px 0;">
+              {projected_pct}%
+            </h1>
+
+            <h2 style="font-size:25px;color:#111111;">
+              Your projected attendance after planned leave
+            </h2>
+
+            <p style="font-size:20px;">
+              Current attendance: {current_pct}%
+            </p>
+
+            <p style="font-size:20px;">
+              Planned leave: {missed_periods} days
+            </p>
+
+            <p style="font-size:19px;color:{status_color};">
+              {status_message}
+            </p>
+
+            <hr style="border:0;border-top:1px solid #eeeeee;">
+
+            <p style="color:#666666;font-size:14px;">
+              Subject: {item.subject}<br>
+              Leave dates: {item.start_date} to {item.end_date}
+            </p>
+
+            <p style="color:#777777;font-size:12px;">
+              This is an estimate based on Monday-Friday working
+              days and one period per working day. Actual attendance
+              will not change automatically.
+            </p>
+
+            <p style="color:#555555;">EduAttendPro Team</p>
+          </div>
+        </body>
+        </html>
+        """
+
+        # Send Gmail notification
+        try:
+            send_email(
+                user.email,
+                "EduAttendPro - Attendance Alert",
+                email_body,
+                html_body=html_body
+            )
+            email_status = "sent"
+
+        except Exception as exc:
+            email_status = "failed: " + str(exc)
+            print("Leave impact email failed:", exc)
+
+
+        # Save email notification status
+        email_log = NotificationLog(
+            student_id=user.id,
+            channel="email",
+            message=email_body,
+            status=email_status[:30]
+        )
+
+        db.session.add(email_log)
+        db.session.commit()
+
+        flash(
+            "Leave request submitted. Email status: " + email_status,
+            "success"
+        )
+
         return redirect(url_for("leaves"))
 
     # Display student's leave requests
@@ -543,6 +767,7 @@ def hod_dashboard():
 # ==========================================
 
 
+
 @app.route("/hod/review/<int:leave_id>", methods=["POST"])
 def hod_review(leave_id):
     user = current_user()
@@ -584,19 +809,69 @@ def hod_review(leave_id):
     leave.hod_remarks = remarks
     leave.hod_reviewed_at = datetime.utcnow()
 
-    # Get student details
     student = db.session.get(User, leave.student_id)
 
     if not student:
         flash("Student account not found.", "error")
         return redirect(url_for("hod_dashboard"))
 
-    # Prepare notification message
-    message = (
-        f"Dear {student.name}, your leave request for "
-        f"{leave.subject} ({leave.start_date} to {leave.end_date}) "
-        f"has been {leave.status} by the HOD."
+    # Calculate current attendance
+    all_records = Attendance.query.filter_by(
+        student_id=student.id
+    ).all()
+
+    total = sum(record.periods for record in all_records)
+
+    present = sum(
+        record.periods
+        for record in all_records
+        if record.status == "Present"
     )
+
+    current_pct = round(
+        present * 100 / total, 1
+    ) if total else 0
+
+    # Estimate missed working days
+    missed_periods = sum(
+        1
+        for day in range(
+            (leave.end_date - leave.start_date).days + 1
+        )
+        if date.fromordinal(
+            leave.start_date.toordinal() + day
+        ).weekday() < 5
+    )
+
+    projected_pct = round(
+        present * 100 / (total + missed_periods), 1
+    ) if total + missed_periods else 0
+
+    decrease = round(current_pct - projected_pct, 1)
+
+    # Prepare notification
+    message = f"""
+Dear {student.name},
+
+Your leave request has been {leave.status} by the HOD.
+
+LEAVE DETAILS
+Subject: {leave.subject}
+Start Date: {leave.start_date}
+End Date: {leave.end_date}
+
+ATTENDANCE IMPACT
+Current Attendance: {current_pct}%
+Projected Attendance: {projected_pct}%
+Expected Attendance Decrease: {decrease}%
+Expected Missed Periods: {missed_periods}
+
+This is an estimate based on Monday-Friday working days
+and one period per working day.
+
+Regards,
+EduAttendPro Team
+"""
 
     if remarks:
         message += f"\nHOD Remarks: {remarks}"
@@ -608,11 +883,9 @@ def hod_review(leave_id):
         message=message,
         status="sent"
     )
-
     db.session.add(notification)
-    db.session.commit()
 
-    # Send email, SMS and WhatsApp
+    # Send notifications
     try:
         results = notify_student(
             student,
@@ -626,7 +899,7 @@ def hod_review(leave_id):
             "whatsapp": "failed: " + str(exc)
         }
 
-    # Save individual delivery results
+    # Save delivery results
     for channel, result in results.items():
         log = NotificationLog(
             student_id=student.id,
@@ -644,6 +917,7 @@ def hod_review(leave_id):
     )
 
     return redirect(url_for("hod_dashboard"))
+
 
 
 
@@ -890,4 +1164,4 @@ def faculty_scan_student_qr():
 
 if __name__ == "__main__":
     with app.app_context(): db.create_all()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5001, debug=True)

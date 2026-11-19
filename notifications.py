@@ -3,12 +3,30 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
+
 def send_email(to_email, subject, body):
     import smtplib
     from email.message import EmailMessage
-    msg=EmailMessage(); msg["Subject"]=subject; msg["From"]=os.environ["SMTP_FROM"]; msg["To"]=to_email; msg.set_content(body)
-    with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT","587"))) as smtp:
-        smtp.starttls(); smtp.login(os.environ["SMTP_USER"],os.environ["SMTP_PASSWORD"]); smtp.send_message(msg)
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = os.environ["SMTP_FROM"]
+    msg["To"] = to_email
+
+    msg.set_content(body)
+
+    msg.add_alternative(body, subtype="html")
+
+    with smtplib.SMTP(
+        os.environ["SMTP_HOST"],
+        int(os.getenv("SMTP_PORT", "587"))
+    ) as smtp:
+        smtp.starttls()
+        smtp.login(
+            os.environ["SMTP_USER"],
+            os.environ["SMTP_PASSWORD"]
+        )
+        smtp.send_message(msg)
 
 def send_sms(to_phone, body):
     from twilio.rest import Client
